@@ -1,4 +1,5 @@
 import os 
+from dotenv import load_dotenv
 import logging
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -11,7 +12,10 @@ import dateutil.parser
 import requests
 from telegram.helpers import escape_markdown
 
+load_dotenv()
+
 TOKEN = os.getenv('TOKEN')
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger.info('Started')
@@ -110,8 +114,40 @@ async def change_team(update: Update, context: CallbackContext) -> None:
 #     user_teams = cur.fetchone()[0].split(',')
 
 async def get_matches(update: Update, context: CallbackContext) -> None:
-    all_matches = requests.get("https://vlrggapi.vercel.app/match?q=upcoming")
-    await update.message.reply_text("Help!")
+    response = requests.get("https://vlrggapi.vercel.app/match?q=upcoming")
+    try:
+        if response.status_code == 200:
+            matches_data = response.json()
+            has_championship_matches = False
+            #only want matches regarding championships
+            for match in matches_data["data"]["segments"]:
+                event = match["match_event"]
+                if 'Champions' not in event:
+                    continue
+                message = (
+                    f"🏆 *{escape_markdown(match['team1'], version=2)} vs {escape_markdown(match['team2'], version=2)}*\n"
+                    f"⏰ {escape_markdown(match['time_until_match'], version=2)}\n"
+                    f"📅 {escape_markdown(match['unix_timestamp'], version=2)}\n"
+                    f"🗺️ {escape_markdown(match['match_series'], version=2)}\n"
+                    f"🔗 [Match Details]({escape_markdown(match['match_page'], version=2)})"
+                )
+                await update.message.reply_text(
+                    text=message,
+                    parse_mode='MarkdownV2',
+                    disable_web_page_preview=True
+                )
+                has_championship_matches = True
+            if not has_championship_matches:
+                await update.message.reply_text(
+                    "There are no upcoming Champion Tour matches",
+                    parse_mode='MarkdownV2'
+                )
+        else:
+            await update.message.reply_text("There was an error fetching the matches")
+            return
+    except Exception as e:
+        logger.error(f"Error fetching matches: {e}")
+        await update.message.reply_text("⚠️ Error fetching matches. Please try again later.")
 
 async def get_news(update: Update, context: CallbackContext) -> None:
     try:
@@ -152,7 +188,7 @@ async def get_news(update: Update, context: CallbackContext) -> None:
 
 def main() -> None:
     # Create the Application and pass it your bot's token.
-    application = Application.builder().token("7768436571:AAFACkIc7BAvJeLpq57IYIlQcwHsqYM1kbc").build()
+    application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("changeteam", change_team))
     application.add_handler(CommandHandler("upcomingmatches", get_matches))
